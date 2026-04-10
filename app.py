@@ -12,11 +12,14 @@ app = Flask(__name__)
 # ============================================================
 # تحميل النموذج
 # ============================================================
-MODEL_PATH     = "olive_model_final.keras"
+MODEL_PATH     = "olive_model.tflite"
 CLASS_MAP_PATH = "class_mapping.json"
 IMG_SIZE       = 224
 
-model = tf.keras.models.load_model(MODEL_PATH)
+interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
+interpreter.allocate_tensors()
+input_details  = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
 
 # تحميل class_mapping من ملف JSON إن وُجد
 if os.path.exists(CLASS_MAP_PATH):
@@ -25,7 +28,6 @@ if os.path.exists(CLASS_MAP_PATH):
     CLASS_INDEX_TO_KEY = {int(k): v for k, v in raw_map.items()}
     print(f"✅ class_mapping محمّل: {CLASS_INDEX_TO_KEY}")
 else:
-    # fallback — الترتيب الأبجدي المتوقع من Keras للـ 4 فئات
     CLASS_INDEX_TO_KEY = {
         0: "Healthy",
         1: "aculus_olearius",
@@ -65,7 +67,6 @@ CLASS_DISPLAY = {
 # ============================================================
 def get_recommendations(class_key: str, confidence: float) -> dict:
 
-    # ---- Healthy ----
     if class_key == "Healthy":
         return {
             "description_ar": "الورقة بصحة ممتازة ولا تحتاج أي تدخل.",
@@ -86,7 +87,6 @@ def get_recommendations(class_key: str, confidence: float) -> dict:
             ],
         }
 
-    # ---- Aculus Olearius ----
     if class_key == "aculus_olearius":
         if confidence >= 90:
             return {
@@ -144,7 +144,6 @@ def get_recommendations(class_key: str, confidence: float) -> dict:
                 ],
             }
 
-    # ---- Olive Knot ----
     if class_key == "olive_knot":
         if confidence >= 90:
             return {
@@ -199,7 +198,6 @@ def get_recommendations(class_key: str, confidence: float) -> dict:
                 ],
             }
 
-    # ---- Peacock Spot ----
     if class_key == "olive_peacock_spot":
         if confidence >= 90:
             return {
@@ -257,7 +255,6 @@ def get_recommendations(class_key: str, confidence: float) -> dict:
                 ],
             }
 
-    # fallback
     return {
         "description_ar": "فئة غير معروفة.",
         "description_en": "Unknown class.",
@@ -281,15 +278,15 @@ def preprocess_image(image_bytes):
 # ============================================================
 # فحص الصورة — Confidence + Entropy
 # ============================================================
-MIN_CONFIDENCE  = 60.0
-MAX_ENTROPY     = 0.85
+MIN_CONFIDENCE = 60.0
+MAX_ENTROPY    = 0.85
 
 def is_valid_olive_leaf(scores: list) -> tuple[bool, str]:
-    probs             = np.array(scores)
-    entropy           = float(-np.sum(probs * np.log(probs + 1e-10)))
-    max_entropy       = np.log(len(scores))
-    norm_entropy      = entropy / max_entropy
-    max_confidence    = max(scores) * 100
+    probs          = np.array(scores)
+    entropy        = float(-np.sum(probs * np.log(probs + 1e-10)))
+    max_entropy    = np.log(len(scores))
+    norm_entropy   = entropy / max_entropy
+    max_confidence = max(scores) * 100
 
     if max_confidence < MIN_CONFIDENCE:
         return False, f"confidence too low ({max_confidence:.1f}%)"
@@ -311,8 +308,11 @@ def predict():
         else:
             return jsonify({"error": "No image provided"}), 400
 
-        input_data  = preprocess_image(image_bytes)
-        output_data = model.predict(input_data, verbose=0)[0]
+        input_data = preprocess_image(image_bytes)
+
+        interpreter.set_tensor(input_details[0]['index'], input_data)
+        interpreter.invoke()
+        output_data = interpreter.get_tensor(output_details[0]['index'])[0]
 
         print(f"Raw output: {output_data}")
 
@@ -320,7 +320,6 @@ def predict():
         class_index = int(np.argmax(scores))
         confidence  = round(scores[class_index] * 100, 2)
 
-        # فحص صحة الصورة
         valid, reason = is_valid_olive_leaf(scores)
         if not valid:
             print(f"❌ صورة مرفوضة: {reason}")
