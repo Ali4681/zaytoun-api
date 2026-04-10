@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 import numpy as np
-import tensorflow as tf
+import tflite_runtime.interpreter as tflite
 from PIL import Image
 import io
 import base64
@@ -16,7 +16,7 @@ MODEL_PATH     = "olive_model.tflite"
 CLASS_MAP_PATH = "class_mapping.json"
 IMG_SIZE       = 224
 
-interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
+interpreter = tflite.Interpreter(model_path=MODEL_PATH)
 interpreter.allocate_tensors()
 input_details  = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
